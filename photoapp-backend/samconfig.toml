@@ -1,0 +1,13 @@
+version = 0.1
+
+[default.deploy.parameters]
+stack_name = "test3"
+s3_bucket = "sam-deploy-oussama"  # ✅ Bucket de déploiement
+s3_prefix = "test3"
+region = "us-east-2"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM"
+image_repositories = []
+resolve_s3 = true
+parameter_overrides = "ExistingBucketName=\"oussama49\" UserPoolArn=\"arn:aws:cognito-idp:us-east-2:887592092375:userpool/us-east-2_ATTuZs7Ih\""
+

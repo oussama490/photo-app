@@ -1,0 +1,301 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Backend PhotoApp avec upload, albums, profil, favoris, Bedrock (Claude 3.5) et Cognito
+
+Globals:
+  Function:
+    Timeout: 10
+    Runtime: python3.12
+    Architectures: [x86_64]
+  Api:
+    Cors:
+      AllowMethods: "'GET,POST,DELETE,OPTIONS'"
+      AllowHeaders: "'Content-Type,Authorization'"
+      AllowOrigin: "'*'"
+
+Parameters:
+  ExistingBucketName:
+    Type: String
+    Default: oussama49
+  UserPoolArn:
+    Type: String
+    Default: arn:aws:cognito-idp:us-east-2:887592092375:userpool/us-east-2_Hoe1KODsW
+
+Resources:
+
+  MyApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: PhotoAppApi
+      StageName: Prod
+      Cors:
+        AllowMethods: "'GET,POST,DELETE,OPTIONS'"
+        AllowHeaders: "'Content-Type,Authorization'"
+        AllowOrigin: "'*'"
+      Auth:
+        DefaultAuthorizer: CognitoAuthorizer
+        AddDefaultAuthorizerToCorsPreflight: false
+        Authorizers:
+          CognitoAuthorizer:
+            UserPoolArn: !Ref UserPoolArn
+
+  GenerateUploadUrlFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: GenerateUploadUrlFunction
+      CodeUri: upload_url/
+      Handler: app.lambda_handler
+      Events:
+        UploadUrl:
+          Type: Api
+          Properties:
+            Path: /upload-url
+            Method: GET
+            RestApiId: !Ref MyApi
+      Environment:
+        Variables:
+          BUCKET_NAME: !Ref ExistingBucketName
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: s3:PutObject
+              Resource: !Sub arn:aws:s3:::${ExistingBucketName}/photo/*
+
+  GetLabelsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: GetLabelsFunction
+      CodeUri: get_labels/
+      Handler: app.lambda_handler
+      Events:
+        GetLabels:
+          Type: Api
+          Properties:
+            Path: /labels
+            Method: GET
+            RestApiId: !Ref MyApi
+      Environment:
+        Variables:
+          TABLE_NAME: PhotoLabels
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: PhotoLabels
+
+  AnalyzePhotoFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: AnalyzePhotoFunction
+      CodeUri: analyze_photo/
+      Handler: app.lambda_handler
+      Events:
+        Analyze:
+          Type: Api
+          Properties:
+            Path: /analyze
+            Method: POST
+            RestApiId: !Ref MyApi
+      Environment:
+        Variables:
+          TABLE_NAME: PhotoLabels
+          BUCKET_NAME: !Ref ExistingBucketName
+      Policies:
+        - AmazonRekognitionFullAccess
+        - DynamoDBCrudPolicy:
+            TableName: PhotoLabels
+        - Statement:
+            - Effect: Allow
+              Action: s3:GetObject
+              Resource: !Sub arn:aws:s3:::${ExistingBucketName}/photo/*
+
+  CreateAlbumFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: CreateAlbumFunction
+      CodeUri: create_album/
+      Handler: app.lambda_handler
+      Events:
+        CreateAlbumApi:
+          Type: Api
+          Properties:
+            Path: /albums
+            Method: POST
+            RestApiId: !Ref MyApi
+            Auth:
+              Authorizer: CognitoAuthorizer
+      Environment:
+        Variables:
+          ALBUMS_TABLE: Albums
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: Albums
+
+  ListAlbumsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: ListAlbumsFunction
+      CodeUri: listAlbums/
+      Handler: app.lambda_handler
+      Events:
+        ListAlbumsApi:
+          Type: Api
+          Properties:
+            Path: /albums
+            Method: GET
+            RestApiId: !Ref MyApi
+            Auth:
+              Authorizer: CognitoAuthorizer
+      Environment:
+        Variables:
+          ALBUMS_TABLE: Albums
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: Albums
+
+  DeleteAlbumFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: DeleteAlbumFunction
+      CodeUri: delete_album/
+      Handler: app.lambda_handler
+      Events:
+        DeleteAlbumApi:
+          Type: Api
+          Properties:
+            Path: /albums/{albumId}
+            Method: DELETE
+            RestApiId: !Ref MyApi
+            Auth:
+              Authorizer: CognitoAuthorizer
+      Environment:
+        Variables:
+          ALBUMS_TABLE: Albums
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: Albums
+
+  ListPhotosFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: ListPhotosFunction
+      CodeUri: listPhotos/
+      Handler: app.lambda_handler
+      Events:
+        ListPhotosApi:
+          Type: Api
+          Properties:
+            Path: /photos
+            Method: GET
+            RestApiId: !Ref MyApi
+      Environment:
+        Variables:
+          PHOTO_LABELS_TABLE: PhotoLabels
+          BUCKET_NAME: !Ref ExistingBucketName
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: PhotoLabels
+        - Statement:
+            - Effect: Allow
+              Action: s3:GetObject
+              Resource: !Sub arn:aws:s3:::${ExistingBucketName}/photo/*
+
+  DeletePhotoFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: DeletePhotoFunction
+      CodeUri: delete_photo/
+      Handler: app.lambda_handler
+      Events:
+        DeletePhotoApi:
+          Type: Api
+          Properties:
+            Path: /photos
+            Method: DELETE
+            RestApiId: !Ref MyApi
+            Auth:
+              Authorizer: CognitoAuthorizer
+      Environment:
+        Variables:
+          BUCKET_NAME: !Ref ExistingBucketName
+          TABLE_NAME: PhotoLabels
+      Policies:
+        - S3CrudPolicy:
+            BucketName: !Ref ExistingBucketName
+        - DynamoDBCrudPolicy:
+            TableName: PhotoLabels
+
+  ToggleFavoriteFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: ToggleFavoriteFunction
+      CodeUri: toggle_favorite/
+      Handler: app.lambda_handler
+      Events:
+        ToggleFavoriteApi:
+          Type: Api
+          Properties:
+            Path: /favorite
+            Method: POST
+            RestApiId: !Ref MyApi
+            Auth:
+              Authorizer: CognitoAuthorizer
+      Environment:
+        Variables:
+          TABLE_NAME: PhotoLabels
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: PhotoLabels
+
+  GetProfilePhotoFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: GetProfilePhotoFunction
+      CodeUri: get_profile_photo/
+      Handler: app.lambda_handler
+      Events:
+        GetProfilePhotoApi:
+          Type: Api
+          Properties:
+            Path: /get-profile-photo
+            Method: GET
+            RestApiId: !Ref MyApi
+            Auth:
+              Authorizer: CognitoAuthorizer
+      Environment:
+        Variables:
+          PHOTO_BUCKET: !Ref ExistingBucketName
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: s3:GetObject
+              Resource: !Sub arn:aws:s3:::${ExistingBucketName}/profile_photos/*
+
+  UploadProfilePhotoFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: UploadProfilePhotoFunction
+      CodeUri: upload_profile_photo/
+      Handler: app.lambda_handler
+      Events:
+        UploadProfilePhotoApi:
+          Type: Api
+          Properties:
+            Path: /upload-profile-photo
+            Method: POST
+            RestApiId: !Ref MyApi
+            Auth:
+              Authorizer: CognitoAuthorizer
+      Environment:
+        Variables:
+          PHOTO_BUCKET: !Ref ExistingBucketName
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: s3:PutObject
+              Resource: !Sub arn:aws:s3:::${ExistingBucketName}/profile_photos/*
+
+ 
+
+Outputs:
+  ApiUrl:
+    Description: URL de base de l’API Gateway
+    Value: !Sub "https://${MyApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/"
